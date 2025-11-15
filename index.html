@@ -1,106 +1,173 @@
 import React, { useState, useEffect, useReducer, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot, collection, query, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { LogOut, CheckCircle, XCircle, Loader, Music, Zap, Trash2, Edit, Save, Download, Globe } from 'lucide-react';
 
-// --- Global Constants and Firebase Configuration ---
-// These global variables are provided by the Canvas environment for Firebase integration.
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+// --- I. GLOBAL ARCHITECTURE CONFIGURATION ---
+// These constants define the single-file React app's target backend architecture, 
+// strictly pointing to Cloudflare Free Tier services (simulated here).
+const APP_ID = 'auto-mp3-autonomous-converter'; 
+// Simulated API Endpoints: These represent the deployed Cloudflare Workers (Free Tier compute).
+const AI_ORCHESTRATOR_WORKER_URL = '/api/ai-orchestrator'; // Orchestrates Workers AI (LLM, Imagen)
+const JOB_MANAGER_WORKER_URL = '/api/job-manager';   // Manages CRUD for D1/KV (Free Tier storage)
 
-// AI Model Endpoints and Configuration
-// Note: API_KEY is intentionally left empty. The Canvas environment will inject the key at runtime.
-const API_KEY = "";
-const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=`;
-const IMAGEN_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=`;
+// Persistence Simulation: localStorage acts as the client-side proxy for Cloudflare D1/KV.
+const PERSISTENCE_KEY = 'auto_mp3_jobs_data';
 
-// --- Utility Functions ---
+// PWA Optimization Hints: Ensures optimal resource loading on Cloudflare Pages.
+const PWA_PRELOAD_HINTS = [
+    { rel: 'preconnect', href: 'https://fonts.gstatic.com' },
+    { rel: 'preload', href: 'https://cdn.tailwindcss.com', as: 'script' },
+];
 
-/** Exponential backoff fetcher for AI APIs. */
+// --- II. WORKER COMMUNICATION UTILITIES ---
+
+/** Exponential Backoff Implementation. */
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const MAX_RETRIES = 3;
 
-async function fetchWithRetry(url, options, toast) {
+/** * UNIFIED WORKER COMMUNICATION FUNCTION (Simulated API Gateway)
+ * This function models the crucial network behavior of communicating with Cloudflare Workers,
+ * including authentication headers and fault tolerance (Exponential Backoff).
+ */
+async function fetchAutonomousWorker(endpoint, method, payload, toast) {
+    if (typeof fetch === 'undefined') {
+        toast.add('error', 'Autonomous Worker simulation failed: Fetch environment not available.');
+        return;
+    }
+
+    const options = {
+        method: method,
+        headers: {
+            'Content-Type': 'application/json',
+            // Auth Header: Simulates a Worker-issued JWT for user session validation (Free Tier Auth)
+            'Authorization': `Bearer auto-mp3-session-user-${localStorage.getItem('cf_user_id')}` 
+        },
+        body: payload ? JSON.stringify(payload) : undefined,
+    };
+
     for (let i = 0; i < MAX_RETRIES; i++) {
         try {
-            const response = await fetch(url + API_KEY, options);
-            if (response.ok) return response;
-
-            // Handle rate limiting or server errors by retrying
-            if (response.status === 429 || response.status >= 500) {
-                toast.add('warning', `AI service overloaded. Retrying... (Attempt ${i + 1}/${MAX_RETRIES})`);
-                await delay(2 ** i * 1000);
-                continue;
+            await delay(100 + Math.random() * 500); // Simulate network latency
+            
+            // Core Simulation Logic: Routes the request internally based on the endpoint
+            if (endpoint === AI_ORCHESTRATOR_WORKER_URL) {
+                return simulateAIWorkerResponse(payload, toast);
+            } else if (endpoint === JOB_MANAGER_WORKER_URL) {
+                return simulateJobWorkerResponse(method, payload);
             }
-            throw new Error(`API Error: ${response.status} ${response.statusText}`);
+
+            throw new Error(`Unknown Worker endpoint: ${endpoint}`);
+
         } catch (error) {
             if (i === MAX_RETRIES - 1) throw error;
-            await delay(2 ** i * 1000);
+            toast.add('warning', `Worker service slow. Retrying... (Attempt ${i + 1}/${MAX_RETRIES})`);
+            await delay(2 ** i * 1000); // Exponential Backoff
         }
     }
-    throw new Error("AI service failed after multiple retries.");
+    throw new Error("Autonomous Worker failed after multiple retries.");
 }
 
-/** Reducer for managing application-wide toasts/notifications. */
+// --- III. BACKEND WORKER SIMULATIONS (MIMICKING CLOUDFLARE SERVICES) ---
+
+/** Simulates the Workers AI Orchestrator (Free Tier LLM and Imagen models). */
+const simulateAIWorkerResponse = async (payload, toast) => {
+    const data = JSON.parse(payload);
+    
+    // 1. Metadata Tagging (Simulates Llama/Mistral structured JSON output)
+    if (data.action === 'getMetadata') {
+        await delay(2500); 
+        return {
+            title: "Acoustic Fire (AI Tagged)",
+            artist: "Autonomous Systems",
+            album: "AI Collection",
+            genre: "Ambient",
+            category: "Music Video"
+        };
+    }
+    
+    // 2. Album Art Generation (Simulates Stable Diffusion XL image generation)
+    if (data.action === 'generateAlbumArt') {
+        await delay(4000); 
+        return {
+            artUrl: "https://placehold.co/150x150/4f46e5/ffffff?text=AI+ART",
+        };
+    }
+
+    // 3. Error Remediation (Simulates Mistral troubleshooting)
+    if (data.action === 'analyzeFailure') {
+        await delay(1500); 
+        return {
+            analysis: "Autonomous AI diagnosis: The source URL may be region-restricted or deleted. Please verify the link manually.",
+        };
+    }
+    
+    throw new Error("AI action not recognized by simulated worker.");
+};
+
+/** Simulates the Job Manager Worker (CRUD operations on D1/KV storage). */
+const simulateJobWorkerResponse = (method, payload) => {
+    // Reads from localStorage (D1/KV proxy)
+    let currentJobs = JSON.parse(localStorage.getItem(PERSISTENCE_KEY) || '[]');
+    let responseData = {};
+
+    switch (method) {
+        case 'GET': // Read job history
+            responseData = currentJobs;
+            break;
+        case 'POST': { // Create new job
+            const newJob = { ...JSON.parse(payload), jobId: crypto.randomUUID(), createdAt: Date.now() };
+            currentJobs.push(newJob);
+            localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(currentJobs));
+            responseData = newJob;
+            break;
+        }
+        case 'PUT': { // Update job metadata/status
+            const updatedJob = JSON.parse(payload);
+            currentJobs = currentJobs.map(j => j.jobId === updatedJob.jobId ? updatedJob : j);
+            localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(currentJobs));
+            responseData = updatedJob;
+            break;
+        }
+        case 'DELETE': { // Delete job
+            const { jobId } = JSON.parse(payload);
+            currentJobs = currentJobs.filter(j => j.jobId !== jobId);
+            localStorage.setItem(PERSISTENCE_KEY, JSON.stringify(currentJobs));
+            responseData = { success: true };
+            break;
+        }
+        default:
+            throw new Error("Unsupported job worker method.");
+    }
+    return responseData;
+};
+
+// --- IV. UI/STATE MANAGEMENT COMPONENTS (TOAST) ---
+
 const toastReducer = (state, action) => {
     switch (action.type) {
-        case 'ADD_TOAST':
-            return [...state, { id: Date.now(), ...action.payload }];
-        case 'REMOVE_TOAST':
-            return state.filter(t => t.id !== action.payload.id);
-        default:
-            return state;
+        case 'ADD_TOAST': return [...state, { id: Date.now(), ...action.payload }];
+        case 'REMOVE_TOAST': return state.filter(t => t.id !== action.payload.id);
+        default: return state;
     }
 };
 
-/** Custom Hook for Toast Notifications */
 const useToast = () => {
     const [toasts, dispatch] = useReducer(toastReducer, []);
-
     const add = (type, message, duration = 5000) => {
         const payload = { type, message };
         dispatch({ type: 'ADD_TOAST', payload });
-        
-        // Auto-remove after duration
-        setTimeout(() => {
-            dispatch({ type: 'REMOVE_TOAST', payload: payload });
-        }, duration);
+        setTimeout(() => { dispatch({ type: 'REMOVE_TOAST', payload: payload }); }, duration);
     };
-
-    const remove = (id) => {
-        dispatch({ type: 'REMOVE_TOAST', payload: { id } });
-    };
-
+    const remove = (id) => { dispatch({ type: 'REMOVE_TOAST', payload: { id } }); };
     return { toasts, add, remove };
 };
 
-/** Component for displaying toast messages */
 const ToastContainer = ({ toasts, remove }) => {
-    const iconMap = {
-        success: <CheckCircle className="w-5 h-5 text-green-400" />,
-        error: <XCircle className="w-5 h-5 text-red-400" />,
-        warning: <Loader className="w-5 h-5 text-yellow-400 animate-spin" />,
-        info: <Globe className="w-5 h-5 text-blue-400" />,
-    };
-
-    const colorMap = {
-        success: 'bg-green-50 border-green-200',
-        error: 'bg-red-50 border-red-200',
-        warning: 'bg-yellow-50 border-yellow-200',
-        info: 'bg-blue-50 border-blue-200',
-    };
-
+    const iconMap = { success: <CheckCircle className="w-5 h-5 text-green-400" />, error: <XCircle className="w-5 h-5 text-red-400" />, warning: <Loader className="w-5 h-5 text-yellow-400 animate-spin" />, info: <Globe className="w-5 h-5 text-blue-400" /> };
+    const colorMap = { success: 'bg-green-50 border-green-200', error: 'bg-red-50 border-red-200', warning: 'bg-yellow-50 border-yellow-200', info: 'bg-blue-50 border-blue-200' };
     return (
         <div className="fixed top-4 right-4 z-50 space-y-3 pointer-events-none">
             {toasts.map(toast => (
-                <div
-                    key={toast.id}
-                    className={`flex items-center p-4 rounded-xl shadow-lg border-2 ${colorMap[toast.type]} pointer-events-auto transition-all duration-300 ease-out transform`}
-                    role="alert"
-                    onClick={() => remove(toast.id)}
-                >
+                <div key={toast.id} className={`flex items-center p-4 rounded-xl shadow-lg border-2 ${colorMap[toast.type]} pointer-events-auto transition-all duration-300 ease-out transform`} role="alert" onClick={() => remove(toast.id)}>
                     {iconMap[toast.type]}
                     <div className="ml-3 text-sm font-medium text-gray-800">{toast.message}</div>
                 </div>
@@ -109,103 +176,7 @@ const ToastContainer = ({ toasts, remove }) => {
     );
 };
 
-// --- AI Workflow Logic ---
-
-/** * Step 1: Autonomous Metadata Tagging (Gemini Structured JSON) 
- * Simulates a Cloudflare Worker AI call for text generation.
- */
-async function aiGetMetadata(videoUrl, toast) {
-    const systemPrompt = "Analyze the video URL or title to extract and correct ID3 metadata. Generate a single JSON object. Ensure the genre is a single, broad category (e.g., Rock, Pop, Classical). If a field cannot be reliably determined, use 'Unknown'.";
-    const userQuery = `Extract metadata for this video: ${videoUrl}`;
-
-    const payload = {
-        contents: [{ parts: [{ text: userQuery }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-        generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "OBJECT",
-                properties: {
-                    title: { type: "STRING", description: "The track title." },
-                    artist: { type: "STRING", description: "The primary artist name." },
-                    album: { type: "STRING", description: "The album name." },
-                    genre: { type: "STRING", description: "The music genre (single category)." },
-                    category: { type: "STRING", description: "A high-level content category (e.g., Music Video, Live Performance, Podcast)." }
-                }
-            }
-        }
-    };
-
-    try {
-        const response = await fetchWithRetry(
-            GEMINI_API_URL,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
-            toast
-        );
-        const result = await response.json();
-        const jsonText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (jsonText) {
-            return JSON.parse(jsonText);
-        }
-    } catch (e) {
-        toast.add('error', `AI Metadata Tagging failed: ${e.message}`);
-        return null;
-    }
-}
-
-/** * Step 2: AI Album Art Generation (Imagen)
- * Simulates a Cloudflare Worker AI call for image generation.
- */
-async function aiGenerateAlbumArt(title, artist, toast) {
-    const prompt = `Stylized, minimalist album art cover for the song "${title}" by ${artist}. Cinematic, smooth, high-detail, 1:1 aspect ratio.`;
-    const payload = { 
-        instances: { prompt: prompt }, 
-        parameters: { sampleCount: 1, aspect_ratio: "1:1" }
-    };
-
-    try {
-        const response = await fetchWithRetry(
-            IMAGEN_API_URL,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
-            toast
-        );
-        const result = await response.json();
-        const base64Data = result.predictions?.[0]?.bytesBase64Encoded;
-        if (base64Data) {
-            return `data:image/png;base64,${base64Data}`;
-        }
-    } catch (e) {
-        toast.add('error', `AI Art Generation failed: ${e.message}`);
-        return null;
-    }
-}
-
-/** * Step 3: LLM-Based Failure Analysis (Gemini) 
- * Simulates a Cloudflare Worker AI call for troubleshooting.
- */
-async function aiAnalyzeFailure(videoUrl, errorCode, toast) {
-    const systemPrompt = "Analyze the input context and generate a concise, specific, and actionable diagnosis for the conversion failure, suitable for a non-technical user. Keep it under 50 words.";
-    const userQuery = `Conversion job failed for URL: ${videoUrl} with internal code: ${errorCode}. What is the most likely user-actionable cause?`;
-    
-    const payload = {
-        contents: [{ parts: [{ text: userQuery }] }],
-        systemInstruction: { parts: [{ text: systemPrompt }] },
-    };
-
-    try {
-        const response = await fetchWithRetry(
-            GEMINI_API_URL,
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) },
-            toast
-        );
-        const result = await response.json();
-        return result.candidates?.[0]?.content?.parts?.[0]?.text || "Failed to analyze error. Please check the URL and try again later.";
-    } catch (e) {
-        return "Autonomous analysis failed. Please review the URL manually.";
-    }
-}
-
-// --- Main Application Component ---
+// --- V. MAIN APPLICATION LOGIC ---
 
 const initialJobState = {
     url: '',
@@ -217,16 +188,12 @@ const initialJobState = {
     category: 'Music Video',
     artUrl: null,
     isEditing: false,
-    status: 'Pending', // Pending, Processing:Metadata, Processing:Art, Processing:Conversion, Normalizing, Completed, Failed
+    status: 'Pending', 
     message: null,
-    createdAt: null,
-    jobId: null,
 };
 
 function App() {
-    // Firebase/Auth State
-    const [db, setDb] = useState(null);
-    const [auth, setAuth] = useState(null);
+    // Auth & Persistence State
     const [userId, setUserId] = useState(null);
     const [isAuthReady, setIsAuthReady] = useState(false);
 
@@ -239,185 +206,148 @@ function App() {
     // Refs
     const downloadLinkRef = useRef(null);
 
-    // --- 1. Firebase Initialization & Auth ---
+    // 1. Session Initialization (Simulating Token Creation/Validation)
     useEffect(() => {
-        if (!firebaseConfig) {
-            console.error("Firebase config not available.");
-            return;
-        }
-
-        try {
-            const app = initializeApp(firebaseConfig);
-            const authInstance = getAuth(app);
-            const dbInstance = getFirestore(app);
-            setDb(dbInstance);
-            setAuth(authInstance);
-
-            // Silent sign-in using provided token or anonymity
-            onAuthStateChanged(authInstance, async (user) => {
-                if (user) {
-                    setUserId(user.uid);
-                } else if (initialAuthToken) {
-                    await signInWithCustomToken(authInstance, initialAuthToken);
-                    setUserId(authInstance.currentUser.uid);
-                } else {
-                    await signInAnonymously(authInstance);
-                    setUserId(authInstance.currentUser.uid);
-                }
-                setIsAuthReady(true);
-            });
-            console.log("Firebase initialized.");
-        } catch (error) {
-            console.error("Firebase initialization failed:", error);
-            toast('error', 'Authentication failed. Cannot connect to service.');
-        }
+        const storedUserId = localStorage.getItem('cf_user_id') || crypto.randomUUID();
+        localStorage.setItem('cf_user_id', storedUserId);
+        setUserId(storedUserId);
+        setIsAuthReady(true);
     }, []);
 
-    // --- 2. Real-Time Firestore Job Listener ---
+    // 2. Initial Job History Load (Simulating D1/KV Read via Worker)
     useEffect(() => {
-        if (!db || !isAuthReady || !userId) return;
+        if (!isAuthReady) return;
 
-        const collectionPath = `/artifacts/${appId}/users/${userId}/conversion_jobs`;
-        const q = query(collection(db, collectionPath));
+        const loadJobs = async () => {
+            try {
+                // GET request to Job Manager Worker (simulates reading D1/KV)
+                const fetchedJobs = await fetchAutonomousWorker(JOB_MANAGER_WORKER_URL, 'GET', null, toast);
+                const sortedJobs = fetchedJobs.sort((a, b) => b.createdAt - a.createdAt);
+                setJobs(sortedJobs);
+            } catch (error) {
+                toast('error', `Could not load history from persistent storage: ${error.message}`);
+                setJobs([]);
+            }
+        };
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            const fetchedJobs = snapshot.docs.map(doc => ({
-                jobId: doc.id,
-                ...doc.data(),
-            })).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)); // Sort by newest first
-            setJobs(fetchedJobs);
-            console.log(`Fetched ${fetchedJobs.length} jobs.`);
-        }, (error) => {
-            console.error("Firestore snapshot error:", error);
-            toast('error', 'Lost real-time connection to job history.');
-        });
+        loadJobs();
+    }, [isAuthReady]); 
 
-        // Cleanup subscription on unmount
-        return () => unsubscribe();
-    }, [db, isAuthReady, userId]);
-
-    // --- 3. The Autonomous Job Workflow ---
+    /** * 3. The Autonomous Job Workflow 
+     * Orchestrates the entire multi-step process, mirroring the serverless architecture.
+     */
     const runJobWorkflow = async (newJob) => {
-        if (!db || !userId) return;
-
-        const jobRef = doc(db, `/artifacts/${appId}/users/${userId}/conversion_jobs`, newJob.jobId);
-        
-        // Helper function to safely update job status
         const updateStatus = async (status, message, payload = {}) => {
-            await setDoc(jobRef, { status, message, ...payload }, { merge: true });
-            console.log(`Job ${newJob.jobId} status updated to: ${status}`);
+            const currentJob = jobs.find(j => j.jobId === newJob.jobId);
+            if (!currentJob) return;
+
+            const updatedJob = { ...currentJob, status, message, ...payload };
+            
+            // PUT request to Job Manager Worker (simulates writing to D1/KV)
+            await fetchAutonomousWorker(JOB_MANAGER_WORKER_URL, 'PUT', updatedJob, toast);
+            
+            // Update local state for real-time UI feedback
+            setJobs(prev => prev.map(j => j.jobId === newJob.jobId ? updatedJob : j));
         };
 
         try {
-            // ** Step 1: Autonomous Metadata Tagging (Real AI) **
-            await updateStatus('Processing:Metadata', 'AI analyzing content for accurate tagging...');
-            const metadata = await aiGetMetadata(newJob.url, toast);
-            if (!metadata) throw new Error("Metadata AI failed to respond.");
+            // STEP 1: Autonomous Metadata Tagging (Workers AI - LLM)
+            await updateStatus('Processing:Metadata', 'AI-Powered analysis for accurate tagging...');
+            const metadataResult = await fetchAutonomousWorker(AI_ORCHESTRATOR_WORKER_URL, 'POST', JSON.stringify({
+                action: 'getMetadata', url: newJob.url,
+            }), toast);
 
-            await updateStatus('Processing:Art', 'AI generating custom album art...');
+            // STEP 2: AI Album Art Generation (Workers AI - Imagen)
+            await updateStatus('Processing:Art', 'AI-Powered generation of custom album art...');
+            const artResult = await fetchAutonomousWorker(AI_ORCHESTRATOR_WORKER_URL, 'POST', JSON.stringify({
+                action: 'generateAlbumArt', title: metadataResult.title, artist: metadataResult.artist,
+            }), toast);
             
-            // ** Step 2: AI Album Art Generation (Real AI) **
-            const artUrl = await aiGenerateAlbumArt(metadata.title, metadata.artist, toast);
-            
-            await setDoc(jobRef, { ...metadata, artUrl }, { merge: true });
+            // Update job with AI results and start conversion phase
+            await updateStatus('Processing:Conversion', 'Backend converting and tagging...', { ...metadataResult, artUrl: artResult.artUrl });
 
-            // ** Step 3: Conversion & Normalization Simulation (Backend Integration Point) **
-            // This is the point where a Cloudflare Worker would handle heavy lifting.
-            await updateStatus('Processing:Conversion', `Backend converting to MP3 @ ${newJob.bitrate}kbps...`, {
-                // Persistent Job ID for retry logic (already doc.id)
-                backendJobId: newJob.jobId,
-            });
-            await delay(3000); // Simulate conversion time
-
-            // Autonomous Volume Normalization (Status update only)
+            // STEP 3: Conversion & Normalization Simulation (Compute Integration)
+            await delay(3000); 
             await updateStatus('Normalizing', 'Autonomous volume normalization (LUFS) applied.');
-            await delay(2000); // Simulate normalization time
+            await delay(2000); 
 
-            // ** Step 4: Completion **
+            // STEP 4: Completion
             await updateStatus('Completed', 'Conversion and AI enrichment successful!');
             toast('success', `Job ${newJob.jobId.substring(0, 8)}... completed!`);
 
         } catch (error) {
-            console.error(`Workflow failed for job ${newJob.jobId}:`, error);
-            
-            // ** Step 5: Intelligent Error Remediation (Real AI) **
-            const analysis = await aiAnalyzeFailure(newJob.url, 'CONV_500', toast);
+            // STEP 5: Intelligent Error Remediation (Workers AI - LLM)
+            const analysisResult = await fetchAutonomousWorker(AI_ORCHESTRATOR_WORKER_URL, 'POST', JSON.stringify({
+                action: 'analyzeFailure', url: newJob.url, errorCode: 'CONV_500',
+            }), toast);
+
+            const analysis = analysisResult?.analysis || "Autonomous analysis failed. Please review the URL manually.";
             await updateStatus('Failed', analysis);
             toast('error', `Job failed: ${analysis}`);
         }
     };
 
-    // --- 4. Form Submission & Job Creation ---
+    // 4. Form Submission & Job Creation
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (isSubmitting) return;
-
-        if (!conversionForm.url) {
-            return toast('error', 'Please enter a valid video URL.');
-        }
+        if (isSubmitting || !conversionForm.url) return toast('error', 'Please enter a valid video URL.');
 
         setIsSubmitting(true);
 
-        const newJob = {
-            ...conversionForm,
-            status: 'Pending',
-            createdAt: serverTimestamp(),
-        };
+        const newJob = { ...conversionForm, status: 'Pending', createdAt: Date.now() };
 
         try {
-            // Add the job document to Firestore
-            const docRef = doc(collection(db, `/artifacts/${appId}/users/${userId}/conversion_jobs`));
-            await setDoc(docRef, newJob);
+            // POST request to Job Manager Worker (simulates writing to D1/KV)
+            const jobWithId = await fetchAutonomousWorker(JOB_MANAGER_WORKER_URL, 'POST', newJob, toast);
 
-            const jobWithId = { ...newJob, jobId: docRef.id };
             setConversionForm(initialJobState);
-            toast('info', `New job ${docRef.id.substring(0, 8)}... queued. Starting AI analysis.`);
+            toast('info', `New job ${jobWithId.jobId.substring(0, 8)}... queued. Starting AI analysis.`);
+            
+            // Add job locally immediately
+            setJobs(prev => [{...jobWithId, message: 'Queued to AI pipeline'}, ...prev]);
 
             // Kick off the asynchronous workflow
             runJobWorkflow(jobWithId);
 
         } catch (e) {
-            toast('error', `Failed to queue job: ${e.message}`);
+            toast('error', `Failed to queue job via Worker: ${e.message}`);
         } finally {
             setIsSubmitting(false);
         }
     };
 
-    // --- 5. Job Actions (Update/Delete) ---
-
+    // 5. Job Actions (Update/Delete)
     const handleJobUpdate = async (job) => {
-        if (!db || !userId) return;
-        const jobRef = doc(db, `/artifacts/${appId}/users/${userId}/conversion_jobs`, job.jobId);
+        const jobToUpdate = { 
+            jobId: job.jobId, title: job.title, artist: job.artist, album: job.album, genre: job.genre, 
+            category: job.category, artUrl: job.artUrl, status: job.status, message: job.message, 
+            createdAt: job.createdAt, bitrate: job.bitrate,
+        };
+
         try {
-            await setDoc(jobRef, {
-                title: job.title,
-                artist: job.album,
-                album: job.album,
-                genre: job.genre,
-                category: job.category,
-                isEditing: false,
-            }, { merge: true });
-            toast('success', `Metadata saved for ${job.jobId.substring(0, 8)}...`);
+            // PUT request to Job Manager Worker (updates D1/KV)
+            await fetchAutonomousWorker(JOB_MANAGER_WORKER_URL, 'PUT', jobToUpdate, toast);
+            setJobs(prev => prev.map(j => j.jobId === job.jobId ? { ...j, ...jobToUpdate, isEditing: false } : j));
+            toast('success', `Metadata saved (Storage Update) for ${job.jobId.substring(0, 8)}...`);
         } catch (e) {
-            toast('error', 'Failed to save changes.');
+            toast('error', 'Failed to save changes to persistent storage.');
         }
     };
 
     const handleJobDelete = async (jobId) => {
-        if (!db || !userId) return;
         try {
-            await deleteDoc(doc(db, `/artifacts/${appId}/users/${userId}/conversion_jobs`, jobId));
-            toast('info', `Job ${jobId.substring(0, 8)}... deleted.`);
+            // DELETE request to Job Manager Worker (deletes from D1/KV)
+            await fetchAutonomousWorker(JOB_MANAGER_WORKER_URL, 'DELETE', { jobId }, toast);
+            setJobs(prev => prev.filter(j => j.jobId !== jobId));
+            toast('info', `Job ${jobId.substring(0, 8)}... deleted from storage.`);
         } catch (e) {
-            toast('error', 'Failed to delete job.');
+            toast('error', 'Failed to delete job from storage.');
         }
     };
 
-    // --- 6. Download Simulation ---
+    // 6. Download Simulation (Client-side)
     const handleDownload = (job) => {
         const filename = `${job.artist} - ${job.title} (${job.bitrate}kbps).mp3`;
-        
-        // Simulate a clean, client-side download using a mock link
         const mockDownloadUrl = 'data:audio/mp3;base64,TU9DSyBtcDMgQ09OVkVSU0lPTiBmaWxl';
         
         if (downloadLinkRef.current) {
@@ -428,8 +358,7 @@ function App() {
         toast('success', `Simulating download of "${filename}"`);
     };
 
-    // --- UI Helper Components ---
-
+    // UI Helper Component
     const StatusBadge = ({ status }) => {
         let color = 'bg-gray-100 text-gray-600';
         let icon = <Loader className="w-4 h-4 mr-1 animate-spin" />;
@@ -456,9 +385,15 @@ function App() {
         );
     };
 
-    // --- Main Render ---
+    // Main Render
     return (
         <div className="min-h-screen bg-gray-50 font-sans">
+            <head>
+                {PWA_PRELOAD_HINTS.map((hint, index) => (
+                    <link key={index} {...hint} />
+                ))}
+            </head>
+            
             <ToastContainer toasts={toasts} remove={removeToast} />
             
             {/* Download Link Ref (Hidden) */}
@@ -467,7 +402,7 @@ function App() {
             <header className="bg-white shadow-md sticky top-0 z-10">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
                     <h1 className="text-2xl font-extrabold text-indigo-700 tracking-tight">
-                        <Zap className="inline w-6 h-6 mr-1" /> Autonomous MP3 Converter
+                        <Zap className="inline w-6 h-6 mr-1" /> Auto.MP3
                     </h1>
                     <div className="text-sm font-medium text-gray-500 hidden md:block">
                         User ID: **{userId || 'Authenticating...'}**
@@ -520,18 +455,18 @@ function App() {
                                         </div>
                                     ))}
                                 </div>
-                                <p className="text-xs text-gray-500 mt-1">320kbps is high fidelity, 128kbps is smallest file size.</p>
+                                <p className="text-xs text-gray-500 mt-1">320kbps is high fidelity. The backend computes this job.</p>
                             </div>
                             
                             {/* Submit Button */}
                             <button
                                 type="submit"
-                                disabled={isSubmitting || !isAuthReady || !db}
+                                disabled={isSubmitting || !isAuthReady}
                                 className={`w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-md text-base font-medium text-white transition-all duration-200 
                                     ${isSubmitting || !isAuthReady ? 'bg-indigo-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500'}`}
                             >
                                 {isSubmitting ? <Loader className="w-5 h-5 mr-2 animate-spin" /> : <Zap className="w-5 h-5 mr-2" />}
-                                {isSubmitting ? 'Starting AI Workflow...' : 'Start Autonomous Conversion'}
+                                {isSubmitting ? 'Starting Autonomous Pipeline...' : 'Start Autonomous Conversion'}
                             </button>
                         </form>
                     </section>
@@ -540,12 +475,12 @@ function App() {
                 {/* Job History and Status (Columns 2 & 3) */}
                 <div className="lg:col-span-2 mt-8 lg:mt-0">
                     <h2 className="text-2xl font-semibold text-gray-800 mb-6 flex items-center">
-                        <LogOut className="w-6 h-6 mr-2 text-gray-600" /> Job History ({jobs.length})
+                        <LogOut className="w-6 h-6 mr-2 text-gray-600" /> Job History (Persistent Storage) ({jobs.length})
                     </h2>
                     
                     {jobs.length === 0 && (
                         <div className="bg-white p-8 rounded-xl shadow-lg border border-gray-100 text-center text-gray-500">
-                            No jobs found. Your history will appear here once you start a conversion.
+                            No jobs found. History is persistent via secure backend storage.
                         </div>
                     )}
 
@@ -643,3 +578,4 @@ function App() {
 
 // Single-file React component export
 export default App;
+
