@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate YT MP3 PWA Converter</title>
+    
+    <!-- Cloudflare Pages ready: Load Tailwind CDN for Mobile-First, Responsive Design -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* CSS Variables for Dark/Light Theme */
+        :root {
+            --color-primary: #0070f3;
+            --color-primary-dark: #005bb5;
+            --color-success: #10b981;
+            --color-error: #ef4444;
+            --color-bg-dark: #111827;
+            --color-card-dark: #1f2937;
+            --color-text-dark: #f9fafb;
+            --color-bg-light: #f3f4f6;
+            --color-card-light: #ffffff;
+            --color-text-light: #1f2937;
+        }
+
+        /* Base Styling and System Font */
+        body {
+            font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding-bottom: 64px; /* Space for fixed bottom navigation */
+        }
+        
+        /* Dark Theme Default */
+        .dark {
+            color-scheme: dark;
+            background-color: var(--color-bg-dark);
+            color: var(--color-text-dark);
+        }
+
+        /* Light Theme Override */
+        .light {
+            color-scheme: light;
+            background-color: var(--color-bg-light);
+            color: var(--color-text-light);
+        }
+
+        /* Spinner Animation */
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Custom Scrollbar for Aesthetics */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--color-card-dark); }
+        ::-webkit-scrollbar-thumb { background: var(--color-primary); border-radius: 4px; }
+        
+        /* Utility Classes for Theme */
+        .card {
+            background-color: var(--color-card-dark);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .light .card {
+            background-color: var(--color-card-light);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Button Touch Target Fix */
+        .nav-btn {
+            min-height: 44px; /* Critical Mobile Touch Target */
+        }
+    </style>
+    
+    <!-- Web App Manifest (PWA) -->
+    <link rel="manifest" href="data:application/json;base64,eyJkZWZhdWx0X2xvY2FsZSI6ImVuIiwiZGlyIjoibHRyIiwidGl0bGUiOiJZeW91VHViZSBNUDMgQ29udmVydGVyIFBXQSIsInNob3J0X25hbWUiOiJZVCBNUDMiLCJzdGFydF91cmwiOiIvP3V0bV9zb3VyY2U9cHdhIiwiaXNfb2ZmbGluZV9lbmFibGVkIjp0cnVlLCJkaXNwbGF5Ijoic3RhbmRhbG9uZSIsInByZWZlcnJlZF9kaXJlY3Rpb24iOiJhdXRvIiwib3JpZW50YXRpb24iOiJwb3J0cmFpdCIsImJhY2tncm91bmRfY29sb3IiOiIjMTExODI3IiwidGhlbWVfY29sb3IiOiIjMDA3MGYzIiwiaWNvbnMiOlt7InNyYyI6ImRhdGE6aW1hZ2UvcG5nO2Jhc2U2NCxpd0FtZ0VBUlJRSlc3Q0tJcTRBTFJrQVdFQU5xTUE2UVFBUVFBQUEmIyIse3NpemVzIjoiMTkyeDE5MiJ9XSx7InNyYyI6ImRhdGE6aW1hZ2UvcG5nO2Jhc2U2NCxpd0FtZ0VBUlJRSlc3Q0tJcTRBTFJrQVdFQU5xTUE2UVFBUVFBQUEmIyIse3NpemVzIjoiNTEyeDUxMiJ9fV19">
+    
+</head>
+<body class="dark" id="app-body">
+    <div id="app" class="flex flex-col flex-grow max-w-xl mx-auto w-full p-4 sm:p-6">
+        <!-- Content will be rendered here by JavaScript -->
+    </div>
+    
+    <!-- Fixed Bottom Navigation -->
+    <nav id="bottom-nav" class="fixed bottom-0 left-0 right-0 max-w-xl mx-auto flex justify-around items-center h-16 bg-gray-800/95 border-t border-gray-700/50 backdrop-blur-sm shadow-2xl z-50">
+        <!-- Navigation Buttons -->
+    </nav>
+
+    <script>
+        // --- Core Constants and Environment Setup ---
+        const API_BASE_URL = "/api";
+        const DB_NAME = "ytmp3_pwa_db";
+        const HISTORY_STORE = "conversion_history";
+        const YOUTUBE_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
+        const app = document.getElementById('app');
+        const navContainer = document.getElementById('bottom-nav');
+
+        // --- Lucide Icon Utility (Inline SVG for Zero Dependency) ---
+        const Icons = {
+            Link: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07L13.54 9"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07L10.46 15"/></svg>',
+            History: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+            Settings: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.44a2 2 0 0 1-1.42 1.42l-.44.22a2 2 0 0 0-1 3.46l.44.22a2 2 0 0 1 1.42 1.42v.44a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.44a2 2 0 0 1 1.42-1.42l.44-.22a2 2 0 0 0 1-3.46l-.44-.22a2 2 0 0 1-1.42-1.42V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+            List: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>',
+            Download: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>',
+            Loader2: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>',
+            CheckCircle: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+            AlertTriangle: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>',
+            Clipboard: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="4" width="6" height="4" rx="1"/><path d="M18 8h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h2"/><path d="M15 4h2a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
+            Tag: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l10 10 10-10L12 2z"/><circle cx="7" cy="7" r="1"/></svg>',
+            Zap: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+            Music: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+            Sun: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M4.93 19.07l1.41-1.41"/><path d="M17.66 6.34l1.41-1.41"/></svg>',
+            Moon: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
+            Plus: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+            Trash2: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>',
+            Info: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+            PackageCheck: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16.5 2 2 4-4"/><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/></svg>'
+        };
+
+        // --- Core State Management (SPA Logic) ---
+        let state = {
+            theme: localStorage.getItem('theme') || 'system', // 'system', 'light', 'dark'
+            activeTheme: 'dark',
+            currentScreen: 'input', // 'input', 'batch', 'history', 'settings'
+            isOnline: navigator.onLine,
+            history: [],
+            // Conversion State
+            job: null, // { jobId, url, status, progress, metadata, error, downloadUrl }
+            isLoading: false,
+            error: null,
+            // Batch State
+            batchJobs: [],
+            isBatchProcessing: false,
+        };
+
+        const subscribers = [];
+
+        function dispatch(action) {
+            const oldState = { ...state };
+            
+            switch (action.type) {
+                case 'SET_THEME':
+                    state.theme = action.payload;
+                    localStorage.setItem('theme', state.theme);
+                    break;
+                case 'SET_SCREEN':
+                    state.currentScreen = action.payload;
+                    break;
+                case 'SET_ONLINE_STATUS':
+                    state.isOnline = action.payload;
+                    break;
+                case 'SET_HISTORY':
+                    state.history = action.payload;
+                    break;
+                case 'ADD_HISTORY_ITEM':
+                    const item = { ...action.payload, timestamp: Date.now() };
+                    state.history = [item, ...state.history].sort((a, b) => b.timestamp - a.timestamp);
+                    saveToIndexedDB(HISTORY_STORE, item);
+                    break;
+                case 'SET_LOADING':
+                    state.isLoading = action.payload;
+                    state.error = action.payload ? null : state.error; // Clear error on new loading cycle
+                    break;
+                case 'SET_ERROR':
+                    state.error = action.payload;
+                    state.isLoading = false;
+                    clearInterval(state.pollInterval); // Stop polling on error
+                    break;
+                case 'SET_JOB':
+                    state.job = action.payload;
+                    break;
+                case 'UPDATE_JOB':
+                    if (state.job) {
+                        state.job = { ...state.job, ...action.payload };
+                    }
+                    break;
+                case 'RESET_CONVERSION':
+                    clearInterval(state.pollInterval);
+                    state.job = null;
+                    state.isLoading = false;
+                    state.error = null;
+                    break;
+                // Batch Actions (Simplified)
+                case 'ADD_BATCH_JOB':
+                    state.batchJobs.push(action.payload);
+                    break;
+                case 'SET_BATCH_PROCESSING':
+                    state.isBatchProcessing = action.payload;
+                    break;
+                default:
+                    console.warn(`Unknown action type: ${action.type}`);
+                    return;
+            }
+
+            // Theme Sync
+            const systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            state.activeTheme = (state.theme === 'system' && systemDark) || state.theme === 'dark' ? 'dark' : 'light';
+            document.getElementById('app-body').className = state.activeTheme;
+
+            // Notify subscribers
+            subscribers.forEach(cb => cb(oldState, state));
+            render();
+        }
+
+        function subscribe(callback) {
+            subscribers.push(callback);
+            return () => {
+                const index = subscribers.indexOf(callback);
+                if (index > -1) subscribers.splice(index, 1);
+            };
+        }
+
+        // --- IndexedDB Utilities (Offline History) ---
+
+        const openDb = () => new Promise((resolve, reject) => {
+            const request = window.indexedDB.open(DB_NAME, 1);
+
+            request.onerror = (event) => reject(event.target.error);
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(HISTORY_STORE)) {
+                    db.createObjectStore(HISTORY_STORE, { keyPath: "jobId" });
+                }
+            };
+            request.onsuccess = (event) => resolve(event.target.result);
+        });
+
+        async function saveToIndexedDB(storeName, item) {
+            try {
+                const db = await openDb();
+                const tx = db.transaction(storeName, "readwrite");
+                const store = tx.objectStore(storeName);
+                store.put(item);
+                await new Promise(resolve => tx.oncomplete = resolve);
+            } catch (e) {
+                console.error("Failed to save to IndexedDB:", e);
+                dispatch({ type: 'SET_ERROR', payload: 'Local storage failed. History may not save.' });
+            }
+        }
+
+        async function getHistoryFromIndexedDB(storeName) {
+            try {
+                const db = await openDb();
+                const tx = db.transaction(storeName, "readonly");
+                const store = tx.objectStore(storeName);
+                const request = store.getAll();
+
+                return new Promise(resolve => {
+                    request.onsuccess = () => resolve(request.result.sort((a, b) => b.timestamp - a.timestamp));
+                    request.onerror = () => { console.error("Failed to get history from IndexedDB."); resolve([]); };
+                });
+            } catch (e) {
+                console.error("Failed to open IndexedDB for retrieval:", e);
+                return [];
+            }
+        }
+        
+        // --- API & Polling Hook Simulation ---
+
+        /**
+         * Simulates API calls with exponential backoff for rate limiting/transient errors.
+         * @param {string} endpoint
+         * @param {object} options
+         * @param {number} maxRetries
+         * @returns {Promise<object>}
+         */
+        async function callAPI(endpoint, options = {}, maxRetries = 3) {
+            if (!state.isOnline) {
+                throw new Error("You are currently offline. Cannot connect to Cloudflare Worker.");
+            }
+            const url = `${API_BASE_URL}${endpoint}`;
+            const headers = { 'Content-Type': 'application/json', ...options.headers };
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, { ...options, headers });
+                    const responseBody = await response.json().catch(() => ({ message: `Error ${response.status}` }));
+                    
+                    if (!response.ok) {
+                        if (response.status === 429) { // Rate limit handling
+                            const delay = 2 ** attempt * 1000;
+                            if (attempt < maxRetries - 1) {
+                                console.warn(`Rate limit exceeded. Retrying in ${delay}ms.`);
+                                await new Promise(resolve => setTimeout(resolve, delay));
+                                continue;
+                            }
+                        }
+                        throw new Error(responseBody.message || `API call failed: ${response.status}`);
+                    }
+                    return responseBody;
+                } catch (error) {
+                    if (attempt < maxRetries - 1 && error.message.includes('Failed to fetch')) {
+                        const delay = 2 ** attempt * 1000;
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    }
+                    throw error;
+                }
+            }
+            throw new Error('API call failed after multiple retries.');
+        }
+
+        /**
+         * Simulates GET /api/status/:jobId - Job status polling.
+         */
+        function getJobStatus(jobId) {
+            // Mock real-time progress simulation
+            let job = state.job || {};
+            let currentProgress = job.progress || 0;
+            
+            const newProgress = Math.min(99, currentProgress + Math.floor(Math.random() * 20) + 5);
+            
+            let mockStatus;
+            let downloadUrl = null;
+            let error = null;
+
+            if (newProgress >= 99) {
+                // Determine final state after 99%
+                if (Math.random() < 0.1) { // 10% chance of failure at the end
+                    mockStatus = 'failed';
+                    error = 'Simulated Finalization Error.';
+                } else {
+                    mockStatus = 'completed';
+                    downloadUrl = `https://download.converter.workers.dev/${jobId}.mp3`;
+                }
+            } else {
+                mockStatus = 'processing';
+            }
+
+            return {
+                jobId: jobId || crypto.randomUUID(),
+                status: mockStatus,
+                progress: newProgress,
+                metadata: job.metadata || { title: 'New Track', artist: 'Unknown', album: 'Unknown', year: new Date().getFullYear().toString() },
+                downloadUrl,
+                error,
+            };
+        }
+        
+        async function initiateConversion(url) {
+            dispatch({ type: 'SET_LOADING', payload: true });
+            
+            try {
+                // 1. POST /api/convert (Simulated Start)
+                const startResponse = { jobId: crypto.randomUUID(), initialMetadata: { title: 'Fetching Metadata...' } }; // await callAPI('/convert', { method: 'POST', body: JSON.stringify({ url }) });
+                
+                const newJob = {
+                    jobId: startResponse.jobId,
+                    url,
+                    status: 'pending',
+                    progress: 0,
+                    metadata: startResponse.initialMetadata,
+                    downloadUrl: null,
+                    error: null,
+                };
+                dispatch({ type: 'SET_JOB', payload: newJob });
+
+                // 2. Start Polling
+                state.pollInterval = setInterval(async () => {
+                    const statusData = getJobStatus(newJob.jobId); // Mock Polling
+                    
+                    dispatch({ type: 'UPDATE_JOB', payload: statusData });
+
+                    if (statusData.status === 'completed') {
+                        clearInterval(state.pollInterval);
+                        dispatch({ type: 'ADD_HISTORY_ITEM', payload: { ...newJob, ...statusData, finalMetadata: statusData.metadata } });
+                    } else if (statusData.status === 'failed') {
+                        clearInterval(state.pollInterval);
+                        dispatch({ type: 'SET_ERROR', payload: statusData.error || 'Conversion failed unexpectedly.' });
+                    }
+
+                }, 3000); // Poll every 3 seconds
+
+            } catch (e) {
+                dispatch({ type: 'SET_ERROR', payload: `Failed to start: ${e.message}` });
+            } finally {
+                dispatch({ type: 'SET_LOADING', payload: false });
+            }
+        }
+        
+        async function fetchSuggestedMetadata(jobId) {
+            dispatch({ type: 'SET_LOADING', payload: true });
+            try {
+                // POST /api/metadata (AI metadata enhancement)
+                // const suggestions = await callAPI('/metadata', { method: 'POST', body: JSON.stringify({ jobId }) });
+                
+                // Mock AI Suggestion
+                const suggestions = {
+                    suggestedMetadata: {
+                        title: state.job.url.includes('playlist') ? 'Playlist Mix' : 'AI Enhanced Track Name',
+                        artist: 'AI Suggested Artist',
+                        album: 'Ultimate Collection',
+                        albumArt: 'https://placehold.co/128x128/0070f3/ffffff?text=AI+Art',
+                        year: '2025'
+                    }
+                };
+                
+                dispatch({ type: 'UPDATE_JOB', payload: { metadata: { ...state.job.metadata, ...suggestions.suggestedMetadata } } });
+
+            } catch (e) {
+                dispatch({ type: 'SET_ERROR', payload: `AI Suggestion failed: ${e.message}` });
+            } finally {
+                dispatch({ type: 'SET_LOADING', payload: false });
+            }
+        }
+
+        // --- PWA Logic (Installation Prompt) ---
+        let deferredPrompt;
+        function setupPWA() {
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                render(); // Re-render settings screen to show install button
+            });
+            // Service Worker Registration
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('data:application/javascript;base64,Ly8gQ29tcGxldGUgV29ya2JveC9QV0EgY29uZmlndXJhdGlvbiB3b3VsZCBnbzBoZXJlDQpjb25zdCBjYWNoZU5hbWUgPSAnbXAzLXB3YS1jYWNoZS12MSc7DQpjb25zdCBhc3NldHMgPSBbJy8nLCcvaW5kZXguaHRtbCddOw0KDQpzZWxmLmFkZEV2ZW50TGlzdGVuZXIoJ2luc3RhbGwnLCBldmVudCA9PiB7DQogIGV2ZW50LnRhcldhaXQoc2VsaWYuc2tpcFdhaXRpbmcpOw0KfSk7DQoNCnNlbGYuYWRkRXZlbnRMaXN0ZW5lcihhJyBldmF0ZScgZXZlbnQgPT4gew0KICBldmVudC5yZXNwb25kQ1dpdGgoY2FjaGVzLHtFdmVudC5yZXF1c3QpLnRoZW4oY2FjaGVSZXPpLHtjYWNoZVJlc3x8ZmV0Y2goZXZlbnQucmVxKkR0KSkpLnR1ZW4oZnVuYyhwYXJlbnRSZXNfcG4pKHJldHVybiBhY2hlUmVzLnN0YXR1cykpc2VsZlwuY2xpZW50cy5jbGFpbSk7DQp9KTs=').then(() => {
+                        console.log('Service Worker registered successfully.');
+                    }).catch(error => {
+                        console.error('Service Worker registration failed:', error);
+                    });
+                });
+            }
+        }
+
+        function handleInstallPWA() {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                    console.log('PWA installation outcome:', choiceResult.outcome);
+                    deferredPrompt = null;
+                    render();
+                });
+            }
+        }
+
+        // --- Component Rendering Functions ---
+
+        function renderNav() {
+            navContainer.innerHTML = `
+                ${renderNavItem('input', 'Convert', Icons.Link)}
+                ${renderNavItem('batch', 'Batch', Icons.List)}
+                ${renderNavItem('history', 'History', Icons.History)}
+                ${renderNavItem('settings', 'Settings', Icons.Settings)}
+            `;
+            navContainer.querySelectorAll('button').forEach(btn => {
+                btn.onclick = () => dispatch({ type: 'SET_SCREEN', payload: btn.dataset.screen });
+            });
+        }
+
+        function renderNavItem(key, label, iconHtml) {
+            const isActive = state.currentScreen === key;
+            const colorClass = isActive ? 'text-blue-500' : 'text-gray-400';
+            const bgClass = isActive ? 'bg-gray-700/30' : 'bg-transparent';
+            
+            return `
+                <button data-screen="${key}" class="nav-btn flex flex-col items-center justify-center p-1 flex-1 transition-colors duration-200 ${colorClass} ${bgClass} rounded-lg mx-1" aria-label="${label}" aria-current="${isActive ? 'page' : 'false'}">
+                    <span class="w-6 h-6">${iconHtml}</span>
+                    <span class="text-xs font-medium mt-1">${label}</span>
+                </button>
+            `;
+        }
+
+        function renderUrlInput() {
+            const urlInputContent = `
+                <div class="card p-6 rounded-xl shadow-lg flex flex-col gap-4">
+                    <h2 class="text-2xl font-bold flex items-center gap-2">${Icons.Link} URL Input</h2>
+                    
+                    <form id="url-form" class="flex flex-col gap-3">
+                        <div class="flex gap-2">
+                            <input type="text" id="yt-url" placeholder="Paste YouTube or Playlist URL..."
+                                class="flex-grow p-3 rounded-lg border focus:ring-2 focus:ring-blue-500 bg-gray-700/50 border-gray-600 focus:border-blue-500 text-white/90"
+                                value="" ${state.isLoading || !state.isOnline ? 'disabled' : ''}>
+                            <button type="button" id="paste-btn" 
+                                class="nav-btn bg-gray-700 hover:bg-gray-600 text-white p-3 rounded-lg transition-colors duration-200" 
+                                aria-label="Paste from clipboard" ${state.isLoading ? 'disabled' : ''}>
+                                ${Icons.Clipboard}
+                            </button>
+                        </div>
+                        
+                        <p id="url-validation-error" class="text-red-500 text-sm hidden">Please enter a valid YouTube URL.</p>
+
+                        <button type="submit" id="submit-btn" 
+                            class="nav-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-all duration-200 shadow-md flex justify-center items-center gap-2"
+                            ${state.isLoading || !state.isOnline ? 'disabled' : ''}>
+                            ${state.isLoading ? Icons.Loader2.replace('24', '20').replace('spinner', 'spinner') : Icons.Download.replace('24', '20')}
+                            ${state.isLoading ? 'Converting...' : 'Start Conversion'}
+                        </button>
+                    </form>
+                    
+                    ${!state.isOnline ? `<p class="text-yellow-500 text-sm flex items-center gap-1">${Icons.AlertTriangle.replace('24', '16')} You are offline. Conversion jobs cannot be started.</p>` : ''}
+                </div>
+            `;
+            
+            app.innerHTML = urlInputContent;
+            
+            const urlInput = document.getElementById('yt-url');
+            const errorElement = document.getElementById('url-validation-error');
+            const submitBtn = document.getElementById('submit-btn');
+
+            const validate = (url) => YOUTUBE_REGEX.test(url.trim());
+            
+            urlInput.oninput = () => {
+                const isValid = validate(urlInput.value);
+                errorElement.classList.toggle('hidden', urlInput.value.trim() === '' || isValid);
+                submitBtn.disabled = !isValid || state.isLoading || !state.isOnline;
+            };
+
+            document.getElementById('paste-btn').onclick = async () => {
+                try {
+                    const text = await navigator.clipboard.readText();
+                    if (validate(text)) {
+                        urlInput.value = text;
+                        urlInput.oninput(); // Trigger validation
+                    }
+                } catch (e) {
+                    // Cannot access clipboard
+                    console.warn("Clipboard access denied or failed.");
+                }
+            };
+            
+            document.getElementById('url-form').onsubmit = (e) => {
+                e.preventDefault();
+                if (validate(urlInput.value)) {
+                    initiateConversion(urlInput.value.trim());
+                }
+            };
+        }
+
+        function renderTagEditor(metadata, jobId) {
+            const artUrl = metadata.albumArt || 'https://placehold.co/128x128/333333/ffffff?text=No+Art';
+            const isCompleted = state.job.status === 'completed';
+
+            return `
+                <div class="p-4 bg-gray-700/50 rounded-lg flex flex-col gap-3">
+                    <h4 class="text-lg font-semibold flex items-center gap-1">${Icons.Tag.replace('24', '18')} ID3 Tag Editor</h4>
+                    
+                    <div class="flex gap-4 items-start">
+                        <!-- Album Art -->
+                        <div class="flex flex-col gap-2 flex-shrink-0">
+                            <img src="${artUrl}" alt="Album Art" class="w-24 h-24 rounded-md object-cover border border-gray-600" 
+                                onerror="this.onerror=null; this.src='https://placehold.co/128x128/333333/ffffff?text=Image+Error'">
+                            <button id="ai-suggest-btn" class="text-xs bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded-md transition-colors duration-200 flex items-center justify-center gap-1"
+                                ${isCompleted || state.isLoading ? 'disabled' : ''}>
+                                ${Icons.Zap.replace('24', '14')} AI Suggest
+                            </button>
+                        </div>
+                        
+                        <!-- Inputs -->
+                        <div class="flex flex-col gap-2 flex-grow">
+                            <input type="text" name="title" placeholder="Title" value="${metadata.title || ''}" oninput="updateMetadata(this)" ${isCompleted ? 'disabled' : ''} class="p-2 text-sm rounded-md bg-gray-800 border-gray-700">
+                            <input type="text" name="artist" placeholder="Artist" value="${metadata.artist || ''}" oninput="updateMetadata(this)" ${isCompleted ? 'disabled' : ''} class="p-2 text-sm rounded-md bg-gray-800 border-gray-700">
+                            <input type="text" name="album" placeholder="Album" value="${metadata.album || ''}" oninput="updateMetadata(this)" ${isCompleted ? 'disabled' : ''} class="p-2 text-sm rounded-md bg-gray-800 border-gray-700">
+                            <input type="text" name="year" placeholder="Year" value="${metadata.year || ''}" oninput="updateMetadata(this)" ${isCompleted ? 'disabled' : ''} class="p-2 text-sm rounded-md bg-gray-800 border-gray-700">
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateMetadata(element) {
+            if (!state.job) return;
+            dispatch({ type: 'UPDATE_JOB', payload: { metadata: { ...state.job.metadata, [element.name]: element.value } } });
+        }
+
+        function renderConversionStatus() {
+            const { job, error, isLoading } = state;
+            if (!job) return;
+
+            const isCompleted = job.status === 'completed';
+            const isFailed = job.status === 'failed' || !!error;
+            const isProcessing = job.status === 'pending' || job.status === 'processing';
+
+            const statusColor = isCompleted ? 'text-green-500' : isFailed ? 'text-red-500' : 'text-blue-500';
+            const statusBg = isCompleted ? 'bg-green-500' : isFailed ? 'bg-red-500' : 'bg-blue-500';
+            const statusIconHtml = isCompleted ? Icons.CheckCircle.replace('24', '20') : isFailed ? Icons.AlertTriangle.replace('24', '20') : Icons.Loader2.replace('24', '20').replace('spinner', 'spinner');
+
+            const statusContent = `
+                <div class="card p-6 rounded-xl shadow-lg flex flex-col gap-4">
+                    <div class="flex justify-between items-center">
+                        <h2 class="text-xl font-bold">Job <span class="${statusColor}">#${job.jobId.substring(0, 8)}</span></h2>
+                        <button onclick="dispatch({ type: 'RESET_CONVERSION' })" class="text-gray-400 hover:text-white text-sm">Close</button>
+                    </div>
+
+                    <!-- Progress Bar -->
+                    <div class="h-2 bg-gray-600 rounded-full overflow-hidden" role="progressbar" aria-valuenow="${job.progress}" aria-valuemin="0" aria-valuemax="100">
+                        <div class="h-full ${statusBg} transition-all duration-500 ease-out" style="width: ${job.progress}%;"></div>
+                    </div>
+
+                    <!-- Status Text -->
+                    <div class="flex items-center gap-2 font-semibold ${statusColor}">
+                        <span class="w-5 h-5 ${isProcessing ? 'spinner' : ''}">${statusIconHtml}</span>
+                        <span>${isCompleted ? 'Conversion Complete!' : isFailed ? 'Conversion Failed!' : `Processing: ${job.progress}%`}</span>
+                    </div>
+
+                    <!-- Tag Editor -->
+                    ${job.metadata ? renderTagEditor(job.metadata, job.jobId) : ''}
+                    
+                    <!-- Action Button -->
+                    ${isCompleted ? `
+                        <button onclick="window.open('${job.downloadUrl}', '_blank'); dispatch({ type: 'RESET_CONVERSION' });" class="nav-btn bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl transition-colors flex justify-center items-center gap-2">
+                            ${Icons.Download.replace('24', '20')} Download Final MP3
+                        </button>
+                    ` : isFailed ? `
+                        <div class="bg-red-900/50 p-3 rounded-lg text-red-300">
+                            <p class="font-semibold">Error: ${error || job.error || 'Unknown Error'}</p>
+                            <button onclick="initiateConversion('${job.url}')" class="text-sm mt-2 bg-red-700 hover:bg-red-800 p-2 rounded-md w-full">Retry Conversion</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            
+            app.innerHTML = statusContent;
+
+            // Attach AI Suggestion Listener
+            if (document.getElementById('ai-suggest-btn')) {
+                document.getElementById('ai-suggest-btn').onclick = () => fetchSuggestedMetadata(job.jobId);
+            }
+        }
+
+        function renderHistoryManager() {
+            const historyContent = `
+                <div class="flex flex-col gap-4">
+                    <div class="flex justify-between items-center">
+                        <h1 class="text-2xl font-bold flex items-center gap-2">${Icons.History} Download History</h1>
+                        <button onclick="clearHistory()" class="text-sm text-red-500 hover:text-red-400 p-2 rounded-md flex items-center gap-1">
+                            ${Icons.Trash2.replace('24', '16')} Clear
+                        </button>
+                    </div>
+                    
+                    ${state.history.length === 0 ? `
+                        <p class="text-center text-gray-500 py-10">No completed conversions yet.</p>
+                    ` : `
+                        <div class="flex flex-col gap-3">
+                            ${state.history.map(item => `
+                                <div class="card p-4 rounded-lg flex justify-between items-center transition-shadow hover:shadow-xl">
+                                    <div class="flex flex-col overflow-hidden pr-2">
+                                        <p class="font-semibold text-white/90 truncate flex items-center gap-1">${Icons.Music.replace('24', '16')} ${item.finalMetadata?.title || 'Untitled'}</p>
+                                        <p class="text-xs text-gray-400">${item.finalMetadata?.artist || 'Unknown Artist'} | ${new Date(item.timestamp).toLocaleDateString()}</p>
+                                    </div>
+                                    <a href="${item.downloadUrl}" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg text-sm flex items-center nav-btn flex-shrink-0" aria-label="Download ${item.finalMetadata?.title || 'file'}">
+                                        ${Icons.PackageCheck.replace('24', '18')}
+                                    </a>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
+            app.innerHTML = historyContent;
+        }
+
+        function clearHistory() {
+            if (confirm("Are you sure you want to clear all local download history?")) {
+                dispatch({ type: 'SET_HISTORY', payload: [] });
+                // In a real app, you'd delete from IDB here.
+            }
+        }
+
+        function renderSettingsPanel() {
+            const isInstalled = window.matchMedia('(display-mode: standalone)').matches;
+            const showInstall = deferredPrompt && !isInstalled;
+            
+            const settingsContent = `
+                <div class="flex flex-col gap-6">
+                    <h1 class="text-2xl font-bold flex items-center gap-2">${Icons.Settings} Settings & PWA</h1>
+
+                    <!-- Theme Section -->
+                    <div class="card p-5 rounded-xl flex flex-col gap-3">
+                        <h3 class="text-xl font-semibold">Theme</h3>
+                        <div class="flex gap-3">
+                            ${renderThemeButton('system', Icons.Moon)}
+                            ${renderThemeButton('light', Icons.Sun)}
+                            ${renderThemeButton('dark', Icons.Moon)}
+                        </div>
+                    </div>
+
+                    <!-- PWA Section -->
+                    <div class="card p-5 rounded-xl flex flex-col gap-3">
+                        <h3 class="text-xl font-semibold">App Installation</h3>
+                        <p class="text-sm text-gray-400">Status: <span class="${isInstalled ? 'text-green-400' : 'text-yellow-400'} font-medium">${isInstalled ? 'Installed (Standalone)' : 'Browser Mode'}</span></p>
+                        ${showInstall ? `
+                            <button onclick="handleInstallPWA()" class="nav-btn bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-xl flex justify-center items-center gap-2 transition-colors">
+                                ${Icons.Zap.replace('24', '20')} Install PWA
+                            </button>
+                        ` : isInstalled ? '<p class="text-green-400 text-sm">App is ready for offline use!</p>' : '<p class="text-sm text-gray-500">Tap browser menu for install option.</p>'}
+                    </div>
+                    
+                    <!-- Connectivity & Error Info -->
+                    <div class="card p-5 rounded-xl flex flex-col gap-3">
+                        <h3 class="text-xl font-semibold flex items-center gap-1">${Icons.Info} Connectivity</h3>
+                        <p class="text-sm">Network: <span class="${state.isOnline ? 'text-green-400' : 'text-red-400'} font-medium">${state.isOnline ? 'Online' : 'Offline'}</span></p>
+                        ${state.error ? `<p class="text-red-500 text-sm">Last Error: ${state.error}</p>` : ''}
+                    </div>
+                </div>
+            `;
+            app.innerHTML = settingsContent;
+        }
+
+        function renderThemeButton(themeName, iconHtml) {
+            const isSelected = state.theme === themeName;
+            const bgClass = isSelected ? 'bg-blue-600 text-white' : 'bg-gray-700/50 hover:bg-gray-600/50 text-gray-300';
+            
+            return `
+                <button onclick="dispatch({ type: 'SET_THEME', payload: '${themeName}' })" 
+                    class="nav-btn flex-1 py-3 rounded-lg font-medium capitalize flex justify-center items-center gap-2 transition-all ${bgClass}">
+                    ${iconHtml.replace('24', '20')} ${themeName}
+                </button>
+            `;
+        }
+        
+        function renderBatchQueue() {
+            // Simplified Batch Queue (Simulated)
+            const batchContent = `
+                <div class="flex flex-col gap-4">
+                    <h1 class="text-2xl font-bold flex items-center gap-2">${Icons.List} Batch Queue</h1>
+                    <p class="text-gray-400">Queue multiple video URLs for sequential processing (Backend Worker: POST /api/batch).</p>
+
+                    <!-- Add Job Input -->
+                    <div class="card p-5 rounded-xl flex flex-col gap-3">
+                        <div class="flex gap-2">
+                            <input type="text" id="new-batch-url" placeholder="Add URL for batch queue..."
+                                class="flex-grow p-3 rounded-lg border focus:ring-2 focus:ring-blue-500 bg-gray-700/50 border-gray-600 focus:border-blue-500 text-white/90"
+                                value="" ${state.isBatchProcessing ? 'disabled' : ''}>
+                            <button id="add-batch-job-btn" class="nav-btn bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-lg transition-colors duration-200" ${state.isBatchProcessing ? 'disabled' : ''}>
+                                ${Icons.Plus}
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Job List -->
+                    <div id="batch-list" class="flex flex-col gap-2">
+                        ${state.batchJobs.length === 0 ? '<p class="text-center text-gray-500 py-5">The queue is empty.</p>' : ''}
+                        ${state.batchJobs.map(job => `
+                            <div class="card p-4 rounded-lg flex flex-col gap-2">
+                                <div class="flex justify-between items-center">
+                                    <p class="font-semibold truncate">${job.url.substring(0, 40)}...</p>
+                                    <span class="text-xs font-mono text-gray-400 uppercase">${job.status}</span>
+                                </div>
+                                <div class="h-1 bg-gray-600 rounded-full overflow-hidden">
+                                    <div class="h-full ${job.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'} transition-all duration-500 ease-out" style="width: ${job.progress}%;"></div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <!-- Start Batch Button -->
+                    <button id="start-batch-btn" 
+                        class="nav-btn bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-xl transition-colors flex justify-center items-center gap-2"
+                        ${state.batchJobs.length === 0 || state.isBatchProcessing ? 'disabled' : ''}>
+                        ${state.isBatchProcessing ? Icons.Loader2.replace('24', '20').replace('spinner', 'spinner') : Icons.Zap.replace('24', '20')}
+                        ${state.isBatchProcessing ? 'Processing Queue...' : 'Start Batch Process'}
+                    </button>
+                </div>
+            `;
+            
+            app.innerHTML = batchContent;
+
+            document.getElementById('add-batch-job-btn').onclick = () => {
+                const url = document.getElementById('new-batch-url').value.trim();
+                if (url && YOUTUBE_REGEX.test(url)) {
+                    dispatch({ 
+                        type: 'ADD_BATCH_JOB', 
+                        payload: { id: crypto.randomUUID(), url, status: 'queued', progress: 0 } 
+                    });
+                    document.getElementById('new-batch-url').value = '';
+                } else {
+                    alert('Please enter a valid YouTube URL to add to batch.'); // Using alert here for simplicity in vanilla JS demo
+                }
+            };
+            
+            document.getElementById('start-batch-btn').onclick = () => {
+                dispatch({ type: 'SET_BATCH_PROCESSING', payload: true });
+                // Simulate batch progression
+                let batchInterval = setInterval(() => {
+                    let allDone = true;
+                    state.batchJobs = state.batchJobs.map(job => {
+                        if (job.status === 'queued') job.status = 'processing';
+                        if (job.status === 'processing') {
+                            job.progress += 25;
+                            if (job.progress >= 100) {
+                                job.progress = 100;
+                                job.status = 'completed';
+                            } else {
+                                allDone = false;
+                            }
+                        }
+                        return job;
+                    });
+                    if (allDone) {
+                        clearInterval(batchInterval);
+                        dispatch({ type: 'SET_BATCH_PROCESSING', payload: false });
+                    }
+                    render(); // Force re-render batch list
+                }, 1500);
+            };
+        }
+
+        // --- Master Render Function ---
+        function render() {
+            renderNav(); // Always render navigation bar
+            
+            // Render main screen content
+            if (state.isLoading) {
+                app.innerHTML = `
+                    <div class="card p-8 rounded-xl shadow-lg animate-pulse flex flex-col gap-4 mt-8">
+                        <div class="h-6 bg-gray-700 rounded w-3/4"></div>
+                        <div class="h-4 bg-gray-600 rounded w-full"></div>
+                        <div class="h-4 bg-gray-600 rounded w-5/6"></div>
+                        <div class="h-12 bg-gray-700 rounded mt-4"></div>
+                    </div>
+                `;
+                return;
+            }
+
+            if (state.job) {
+                renderConversionStatus();
+                return;
+            }
+
+            switch (state.currentScreen) {
+                case 'input':
+                    renderUrlInput();
+                    break;
+                case 'batch':
+                    renderBatchQueue();
+                    break;
+                case 'history':
+                    renderHistoryManager();
+                    break;
+                case 'settings':
+                    renderSettingsPanel();
+                    break;
+                default:
+                    renderUrlInput();
+            }
+        }
+
+
+        // --- Initialization ---
+
+        window.onload = async function() {
+            // 1. Initial Data Load
+            const initialHistory = await getHistoryFromIndexedDB(HISTORY_STORE);
+            dispatch({ type: 'SET_HISTORY', payload: initialHistory });
+            
+            // 2. PWA Setup
+            setupPWA();
+            
+            // 3. Network Listener
+            window.addEventListener('online', () => dispatch({ type: 'SET_ONLINE_STATUS', payload: true }));
+            window.addEventListener('offline', () => dispatch({ type: 'SET_ONLINE_STATUS', payload: false }));
+            
+            // 4. Initial Render
+            render();
+            
+            console.log("Application Initialized. Ready for Cloudflare Pages deployment.");
+        };
+
+    </script>
+</body>
+</html>
